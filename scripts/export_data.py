@@ -116,6 +116,3 @@ if __name__ == "__main__":
     exporter.export_all()
     exporter.store.disconnect()
 EOF
-
-chmod +x scripts/export_data.py
-echo "Created scripts/export_data.py"
