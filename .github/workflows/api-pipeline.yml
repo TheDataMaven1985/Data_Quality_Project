@@ -195,14 +195,14 @@ jobs:
   
       - name: Upload pipeline logs
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: pipeline-logs
           path: logs/
           retention-days: 30
         
       - name: Upload dashboard
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: dashboard
           path: dashboard.html
@@ -210,7 +210,7 @@ jobs:
       
       - name: Upload exported data
         if: github.event.inputs.export_data == 'true' || github.event_name == 'schedule'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: exported-data
           path: data/*.csv
@@ -228,7 +228,7 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Download dashboard artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: dashboard
           path: ./
