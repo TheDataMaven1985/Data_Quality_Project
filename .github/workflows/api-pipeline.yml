@@ -1,0 +1,234 @@
+name: API Data Pipeline
+
+# workflow triggers
+on:
+# Run on push to main branch
+  push:
+    branches:
+      - main
+      - dev
+    paths-ignore:
+      - 'docs/**'
+      - '.github/**'
+      - 'dashboard.html'
+
+  # Run on pull request
+  pull_request:
+    branches:
+      - main
+      - dev
+  
+  # Run on a schedule (every 6 hours)
+  schedule:
+    - cron: '0/30 * * * *'
+
+  # Allow manual triggering of the workflow
+  workflow_dispatch:
+    inputs:
+      export_data:
+        description: 'Export data to CSV'
+        required: false
+        type: boolean
+        default: true
+      
+# Environment variables
+env:
+  PYTHON_VERSION: '3.11'
+
+# Jobs definition
+jobs:
+  # Job 1: code linting
+  lint:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install linting tools
+        run: |
+          pip install flake8 black pylint
+      
+      - name: Run flake8
+        run: |
+          flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 src/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        continue-on-error: true
+      
+      - name: Check code formatting with black
+        run: |
+          black --check src/
+        continue-on-error: true
+
+ # Job 2: Run Tests
+test:
+  name: Run Tests
+  runs-on: ubuntu-latest
+  needs: lint
+    
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+      
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install pytest pytest-cov pytest-mock
+      
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+      
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+# Job 3: Execute Pipeline
+pipeline:
+  name: Execute Data Pipeline
+  runs-on: ubuntu-latest
+  needs: test
+    
+  # MySQL service container
+  services:
+    mysql:
+      image: mysql:8.0
+      env:
+        MYSQL_ROOT_PASSWORD: github_actions_test
+        MYSQL_DATABASE: api_data_pipeline
+      ports:
+        - 3306:3306
+      options: >-
+        --health-cmd="mysqladmin ping --silent"
+        --health-interval=10s
+        --health-timeout=5s
+        --health-retries=5
+    
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+      
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      
+    - name: Wait for MySQL to be ready
+      run: |
+        echo "Waiting for MySQL to be ready..."
+        for i in {1..30}; do
+          if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -pgithub_actions_test --silent; then
+            echo "MySQL is ready!"
+              break
+          fi
+          echo "Attempt $i: MySQL not ready yet..."
+          sleep 2
+        done
+      
+    - name: Initialize database
+      run: |
+        echo "Creating database schema..."
+        mysql -h 127.0.0.1 -P 3306 -u root -pgithub_actions_test < src/api_data_store
+        echo "Database initialized"
+      
+    - name: Create environment file
+      run: |
+        cat > .env << EOF
+        DB_HOST=127.0.0.1
+        DB_USER=root
+        DB_PASSWORD=github_actions_test
+        DB_NAME=data_quality_db
+        WEATHER_API_KEY=${{ secrets.WEATHER_API_KEY }}
+        EOF
+        echo "Environment file created"
+      
+    - name: Run data pipeline
+      id: pipeline
+      run: |
+        echo "Starting pipeline execution..."
+        python main.py
+        echo "Pipeline execution completed"
+      continue-on-error: false
+      
+    - name: Verify data in database
+      run: |
+        echo "Verifying data..."
+        mysql -h 127.0.0.1 -P 3306 -u root -pgithub_actions_test data_quality_db -e "
+          SELECT 'Cryptocurrencies' as Table_Name, COUNT(*) as Record_Count FROM cryptocurrency_data
+          UNION ALL
+          SELECT 'Posts', COUNT(*) FROM posts_data
+          UNION ALL
+          SELECT 'Weather Summary', COUNT(*) FROM weather_data;
+        "
+      
+    - name: Generate dashboard
+      run: |
+        echo "Generating dashboard..."
+        python src/api_dashboard.py
+        echo "Dashboard generated"
+
+    - name: Export data to CSV
+        if: github.event.inputs.export_data == 'true' || github.event_name == 'schedule'
+        run: |
+          echo "Exporting data to CSV..."
+          mkdir -p data
+          python scripts/export_data.py
+          echo "Data exported"
+
+    - name: Upload pipeline logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: pipeline-logs
+          path: logs/
+          retention-days: 30
+      
+    - name: Upload dashboard
+      uses: actions/upload-artifact@v3
+      with:
+        name: dashboard
+        path: dashboard.html
+        retention-days: 30
+
+# Job 4: Send Notifications
+notify:
+  name: Send Notifications
+  runs-on: ubuntu-latest
+  needs: [pipeline]
+  if: always()
+    
+  steps:
+    - name: Send success notification
+      if: needs.pipeline.result == 'success'
+      run: |
+        echo "Pipeline executed successfully!"
+        echo "View artifacts at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      
+    - name: Send failure notification
+      if: needs.pipeline.result == 'failure'
+      run: |
+        echo "Pipeline execution failed!"
+        echo "Check logs at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
