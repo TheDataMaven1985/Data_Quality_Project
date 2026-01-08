@@ -19,7 +19,7 @@ on:
       - main
       - dev
   
-  # Run on a schedule (every 6 hours) - FIX #1: Changed from every 30 min
+  # Run on a schedule (every 6 hours)
   schedule:
     - cron: '0 */6 * * *'  # Every 6 hours, not every 30 minutes
 
@@ -113,7 +113,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: github_actions_test
-          MYSQL_DATABASE: api_data_pipeline  # FIX #2: Changed from data_quality_db
+          MYSQL_DATABASE: data_quality_db
         ports:
           - 3306:3306
         options: >-
@@ -155,7 +155,7 @@ jobs:
           DB_HOST=127.0.0.1
           DB_USER=root
           DB_PASSWORD=github_actions_test
-          DB_NAME=api_data_pipeline
+          DB_NAME=data_quality_db
           WEATHER_API_KEY=${{ secrets.WEATHER_API_KEY }}
           EOF
           echo "Environment file created"
@@ -171,7 +171,7 @@ jobs:
       - name: Verify data in database
         run: |
           echo "🔍 Verifying data..."
-          mysql -h 127.0.0.1 -P 3306 -u root -pgithub_actions_test api_data_pipeline -e "
+          mysql -h 127.0.0.1 -P 3306 -u root -pgithub_actions_test data_quality_db -e "
             SELECT 'Cryptocurrencies' as Table_Name, COUNT(*) as Record_Count FROM cryptocurrency_data
             UNION ALL
             SELECT 'Posts', COUNT(*) FROM posts_data
@@ -182,7 +182,7 @@ jobs:
       - name: Generate dashboard
         run: |
           echo "Generating dashboard..."
-          python src/api_dashboard.py
+          python src/dashboard_gen.py
           echo "Dashboard generated"
   
       - name: Export data to CSV
