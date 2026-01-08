@@ -187,7 +187,7 @@ pipeline:
     - name: Generate dashboard
       run: |
         echo "Generating dashboard..."
-        python src/api_dashboard.py
+        python src/dashboard_gen.py
         echo "Dashboard generated"
 
     - name: Export data to CSV
